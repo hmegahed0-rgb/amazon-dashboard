@@ -1,72 +1,133 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import sqlite3
+import hashlib
 
 # ================= CONFIG =================
-st.set_page_config(
-    page_title="Amazon BI Elite Dashboard",
-    layout="wide",
-    page_icon="📊"
-)
+st.set_page_config(page_title="Elite SaaS Dashboard", layout="wide", page_icon="📊")
 
+# ================= DB =================
+conn = sqlite3.connect("users.db", check_same_thread=False)
+c = conn.cursor()
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT,
+    password TEXT
+)
+""")
+conn.commit()
+
+# ================= AUTH FUNCTIONS =================
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def signup(username, password):
+    c.execute("INSERT INTO users VALUES (?,?)", (username, hash_password(password)))
+    conn.commit()
+
+def login(username, password):
+    c.execute("SELECT * FROM users WHERE username=? AND password=?",
+              (username, hash_password(password)))
+    return c.fetchone()
+
+# ================= SESSION =================
+if "auth" not in st.session_state:
+    st.session_state.auth = False
+
+# ================= LOGIN UI =================
+if not st.session_state.auth:
+
+    st.title("🔐 SaaS Login System")
+
+    choice = st.radio("Choose Action", ["Login", "Signup"])
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if choice == "Signup":
+        if st.button("Create Account"):
+            signup(username, password)
+            st.success("Account Created! Now login.")
+
+    if choice == "Login":
+        if st.button("Login"):
+            if login(username, password):
+                st.session_state.auth = True
+                st.success("Login successful 🚀")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+    st.stop()
+
+# ================= HEADER =================
 st.markdown("""
-# 📊 Amazon Business Intelligence Dashboard (ELITE)
-### 🤖 AI Insights • 📈 Analytics • 📦 Sales Intelligence
+# 📊 Elite Amazon SaaS Dashboard
+### 🤖 AI • 📈 Analytics • 💰 Business Intelligence
 ---
 """)
 
 # ================= UPLOAD =================
 file = st.file_uploader("📁 Upload Excel File", type=["xlsx"])
 
-if file:
+if file is None:
+    st.info("Upload file to start analytics 🚀")
+    st.stop()
 
-    # ================= DATA =================
-    df = pd.read_excel(file)
-    df['order_date'] = pd.to_datetime(df['order_date'])
+# ================= LOAD DATA =================
+df = pd.read_excel(file)
 
-    # ================= SIDEBAR =================
-    st.sidebar.title("🎛️ Control Panel")
+# safe columns check
+required = ['order_date', 'customer_region', 'product_category', 'total_revenue']
+missing = [c for c in required if c not in df.columns]
 
-    region = st.sidebar.selectbox("Region", df['customer_region'].unique())
-    categories = st.sidebar.multiselect(
-        "Categories",
-        df['product_category'].unique(),
-        default=df['product_category'].unique()
-    )
+if missing:
+    st.error(f"Missing columns: {missing}")
+    st.stop()
 
-    filtered_df = df[
-        (df['customer_region'] == region) &
-        (df['product_category'].isin(categories))
-    ]
+df['order_date'] = pd.to_datetime(df['order_date'])
 
-    # ================= KPIs =================
-    st.markdown("## 📌 Executive KPIs")
+# ================= SIDEBAR =================
+st.sidebar.title("🎛 Control Panel")
 
-    col1, col2, col3, col4 = st.columns(4)
+page = st.sidebar.selectbox("Pages", ["Dashboard", "AI Analyst", "Export"])
 
-    col1.metric("💰 Revenue", f"{filtered_df['total_revenue'].sum():,.0f}")
-    col2.metric("📦 Orders", filtered_df.shape[0])
-    col3.metric("⭐ Rating", round(filtered_df['rating'].mean(), 2))
-    col4.metric("💸 Discount", f"{filtered_df['discount_percent'].mean():.1f}%")
+region = st.sidebar.selectbox("Region", df['customer_region'].unique())
+category = st.sidebar.multiselect("Category", df['product_category'].unique(),
+                                  default=df['product_category'].unique())
 
-    # ================= CHARTS =================
-    st.markdown("## 📊 Analytics Overview")
+filtered = df[
+    (df['customer_region'] == region) &
+    (df['product_category'].isin(category))
+]
 
-    cat = filtered_df.groupby('product_category')['total_revenue'].sum().reset_index()
+# ================= DASHBOARD =================
+if page == "Dashboard":
 
-    fig1 = px.bar(cat, x='product_category', y='total_revenue',
-                  color='total_revenue', color_continuous_scale='Blues',
-                  title="Revenue by Category")
+    st.title("📊 Business Dashboard")
 
-    monthly = filtered_df.groupby(filtered_df['order_date'].dt.to_period('M'))['total_revenue'].sum().reset_index()
+    # KPIs
+    revenue = filtered['total_revenue'].sum()
+    orders = len(filtered)
+    avg_order = revenue / orders if orders > 0 else 0
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("💰 Revenue", f"{revenue:,.0f}")
+    col2.metric("📦 Orders", orders)
+    col3.metric("📊 AOV", f"{avg_order:,.0f}")
+
+    # Charts
+    cat = filtered.groupby('product_category')['total_revenue'].sum().reset_index()
+
+    fig1 = px.bar(cat, x='product_category', y='total_revenue', title="Revenue by Category")
+
+    monthly = filtered.groupby(filtered['order_date'].dt.to_period("M"))['total_revenue'].sum().reset_index()
     monthly['order_date'] = monthly['order_date'].astype(str)
 
-    fig2 = px.line(monthly, x='order_date', y='total_revenue',
-                   markers=True, title="Monthly Revenue Trend")
-
-    fig3 = px.scatter(filtered_df, x='discount_percent', y='total_revenue',
-                      color='product_category', size='total_revenue',
-                      title="Discount vs Revenue")
+    fig2 = px.line(monthly, x='order_date', y='total_revenue', title="Monthly Trend")
 
     col1, col2 = st.columns(2)
 
@@ -74,41 +135,43 @@ if file:
         st.plotly_chart(fig1, use_container_width=True)
 
     with col2:
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width=True)
 
-    st.plotly_chart(fig2, use_container_width=True)
+# ================= AI ANALYST =================
+elif page == "AI Analyst":
 
-    # ================= AI ENGINE =================
-    st.markdown("## 🧠 AI Business Analyst")
+    st.title("🧠 AI Business Analyst")
 
-    top_cat = cat.sort_values('total_revenue', ascending=False).iloc[0]
+    revenue = filtered['total_revenue'].sum()
+    orders = len(filtered)
+
+    top_cat = filtered.groupby('product_category')['total_revenue'].sum().sort_values(ascending=False)
 
     insight = f"""
-📌 **Top Category:** {top_cat['product_category']}  
-💰 **Revenue Leader:** {top_cat['total_revenue']:,.0f}  
+📌 **AI Generated Report**
 
-📦 Orders Analyzed: {filtered_df.shape[0]}  
-⭐ Avg Rating: {filtered_df['rating'].mean():.2f}  
+💰 Total Revenue: {revenue:,.0f}  
+📦 Total Orders: {orders}  
+🏆 Top Category: {top_cat.index[0] if len(top_cat)>0 else 'N/A'}  
 
-📊 **AI Insight:**  
-- Sales performance is strongly driven by top category dominance  
-- Discount strategy impacts revenue distribution  
-- Region: {region} shows distinct buying behavior
+📊 **Insights:**
+- Revenue distribution depends heavily on top categories  
+- Region "{region}" shows distinct demand behavior  
+- Scaling opportunity exists in mid-performing categories  
+
+⚡ **Recommendation:**
+- Increase marketing on top 2 categories  
+- Optimize discount strategy  
+- Expand in high-performing regions
 """
 
     st.success(insight)
 
-    # ================= EXPORT =================
-    st.markdown("## 📥 Export Data")
+# ================= EXPORT =================
+elif page == "Export":
 
-    csv = filtered_df.to_csv(index=False).encode('utf-8')
+    st.title("📥 Export Data")
 
-    st.download_button(
-        "Download CSV Report",
-        csv,
-        "report.csv",
-        "text/csv"
-    )
+    csv = filtered.to_csv(index=False).encode('utf-8')
 
-else:
-    st.info("👆 Upload Excel file to activate Elite Dashboard")
+    st.download_button("Download Report", csv, "report.csv", "text/csv")
