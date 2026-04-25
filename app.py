@@ -7,7 +7,7 @@ import hashlib
 # ================= CONFIG =================
 st.set_page_config(page_title="Elite SaaS Dashboard", layout="wide", page_icon="📊")
 
-# ================= DB =================
+# ================= DATABASE =================
 conn = sqlite3.connect("users.db", check_same_thread=False)
 c = conn.cursor()
 
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# ================= AUTH FUNCTIONS =================
+# ================= AUTH =================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -36,50 +36,50 @@ def login(username, password):
 if "auth" not in st.session_state:
     st.session_state.auth = False
 
-# ================= LOGIN UI =================
+# ================= LOGIN =================
 if not st.session_state.auth:
 
-    st.title("🔐 SaaS Login System")
+    st.title("🔐 SaaS Login")
 
-    choice = st.radio("Choose Action", ["Login", "Signup"])
+    choice = st.radio("Choose", ["Login", "Signup"])
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    user = st.text_input("Username")
+    pwd = st.text_input("Password", type="password")
 
     if choice == "Signup":
         if st.button("Create Account"):
-            signup(username, password)
-            st.success("Account Created! Now login.")
+            signup(user, pwd)
+            st.success("Account created!")
 
     if choice == "Login":
         if st.button("Login"):
-            if login(username, password):
+            if login(user, pwd):
                 st.session_state.auth = True
-                st.success("Login successful 🚀")
                 st.rerun()
             else:
-                st.error("Invalid credentials")
+                st.error("Wrong credentials")
 
     st.stop()
 
 # ================= HEADER =================
 st.markdown("""
-# 📊 Elite Amazon SaaS Dashboard
-### 🤖 AI • 📈 Analytics • 💰 Business Intelligence
+# 📊 Amazon Elite Dashboard
+### 🤖 AI • 📈 Analytics • 💰 BI System
 ---
 """)
 
-# ================= UPLOAD =================
-file = st.file_uploader("📁 Upload Excel File", type=["xlsx"])
+# ================= DATA SOURCE =================
 
-if file is None:
-    st.info("Upload file to start analytics 🚀")
-    st.stop()
+st.sidebar.title("📂 Data Source")
 
-# ================= LOAD DATA =================
-df = pd.read_excel(file)
+uploaded_file = st.sidebar.file_uploader("Upload new dataset (optional)", type=["xlsx"])
 
-# safe columns check
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
+else:
+    df = pd.read_excel("amazon_sales_dataset.xlsx")  # default dataset
+
+# ================= VALIDATION =================
 required = ['order_date', 'customer_region', 'product_category', 'total_revenue']
 missing = [c for c in required if c not in df.columns]
 
@@ -89,29 +89,33 @@ if missing:
 
 df['order_date'] = pd.to_datetime(df['order_date'])
 
-# ================= SIDEBAR =================
-st.sidebar.title("🎛 Control Panel")
-
-page = st.sidebar.selectbox("Pages", ["Dashboard", "AI Analyst", "Export"])
+# ================= FILTERS =================
+st.sidebar.title("🎛 Filters")
 
 region = st.sidebar.selectbox("Region", df['customer_region'].unique())
-category = st.sidebar.multiselect("Category", df['product_category'].unique(),
-                                  default=df['product_category'].unique())
+
+category = st.sidebar.multiselect(
+    "Category",
+    df['product_category'].unique(),
+    default=df['product_category'].unique()
+)
 
 filtered = df[
     (df['customer_region'] == region) &
     (df['product_category'].isin(category))
 ]
 
+# ================= PAGES =================
+page = st.sidebar.selectbox("Pages", ["Dashboard", "AI Analyst", "Export"])
+
 # ================= DASHBOARD =================
 if page == "Dashboard":
 
     st.title("📊 Business Dashboard")
 
-    # KPIs
     revenue = filtered['total_revenue'].sum()
     orders = len(filtered)
-    avg_order = revenue / orders if orders > 0 else 0
+    avg_order = revenue / orders if orders else 0
 
     col1, col2, col3 = st.columns(3)
 
@@ -119,7 +123,6 @@ if page == "Dashboard":
     col2.metric("📦 Orders", orders)
     col3.metric("📊 AOV", f"{avg_order:,.0f}")
 
-    # Charts
     cat = filtered.groupby('product_category')['total_revenue'].sum().reset_index()
 
     fig1 = px.bar(cat, x='product_category', y='total_revenue', title="Revenue by Category")
@@ -137,41 +140,36 @@ if page == "Dashboard":
     with col2:
         st.plotly_chart(fig2, use_container_width=True)
 
-# ================= AI ANALYST =================
+# ================= AI =================
 elif page == "AI Analyst":
 
-    st.title("🧠 AI Business Analyst")
+    st.title("🧠 AI Analyst")
 
     revenue = filtered['total_revenue'].sum()
     orders = len(filtered)
 
     top_cat = filtered.groupby('product_category')['total_revenue'].sum().sort_values(ascending=False)
 
-    insight = f"""
-📌 **AI Generated Report**
-
-💰 Total Revenue: {revenue:,.0f}  
-📦 Total Orders: {orders}  
+    st.success(f"""
+📌 Revenue: {revenue:,.0f}  
+📦 Orders: {orders}  
 🏆 Top Category: {top_cat.index[0] if len(top_cat)>0 else 'N/A'}  
 
-📊 **Insights:**
-- Revenue distribution depends heavily on top categories  
-- Region "{region}" shows distinct demand behavior  
-- Scaling opportunity exists in mid-performing categories  
+📊 Insights:
+- Strong dependency on top categories  
+- Region behavior varies  
+- Growth opportunity exists  
 
-⚡ **Recommendation:**
-- Increase marketing on top 2 categories  
-- Optimize discount strategy  
-- Expand in high-performing regions
-"""
-
-    st.success(insight)
+🚀 Recommendation:
+- Boost top products  
+- Optimize discounts  
+""")
 
 # ================= EXPORT =================
 elif page == "Export":
 
-    st.title("📥 Export Data")
+    st.title("📥 Export")
 
     csv = filtered.to_csv(index=False).encode('utf-8')
 
-    st.download_button("Download Report", csv, "report.csv", "text/csv")
+    st.download_button("Download CSV", csv, "report.csv", "text/csv")
